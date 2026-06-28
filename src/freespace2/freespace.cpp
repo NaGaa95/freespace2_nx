@@ -645,6 +645,9 @@
 #include "timer.h"
 #include "stand_gui.h"
 #include "pcxutils.h"
+#ifdef SWITCH
+#include "switch_input.h"
+#endif
 #include "hudtargetbox.h"
 #include "multi_xfer.h"
 #include "hudescort.h"
@@ -1979,6 +1982,10 @@ void game_loading_callback_init()
 {
 	Assert( Game_loading_callback_inited==0 );
 
+#ifdef SWITCH
+	nx_cpu_boost(1);	// max CPU clock while the level loads
+#endif
+
 	Game_loading_background = bm_load(Game_loading_bground_fname[gr_screen.res]);
 #ifdef MAKE_FS1
 	common_set_interface_palette("InterfacePalette");  // set the interface palette
@@ -2009,6 +2016,10 @@ void game_loading_callback_close()
  	Mouse_hidden = 0;
 
 	Game_loading_callback_inited = 0;
+
+#ifdef SWITCH
+	nx_cpu_boost(0);	// restore normal clocks once loading is done
+#endif
 	
 #ifndef NDEBUG
 	mprintf(( "=================== ENDING LOAD ================\n" ));
@@ -2522,7 +2533,7 @@ void game_init()
 	}
 
 	if(!Is_standalone){
-		if(!stricmp(ptr, "Aucune accélération 3D") || !stricmp(ptr, "Keine 3D-Beschleunigerkarte") || !stricmp(ptr, "No 3D acceleration")){
+		if(!stricmp(ptr, "Aucune accï¿½lï¿½ration 3D") || !stricmp(ptr, "Keine 3D-Beschleunigerkarte") || !stricmp(ptr, "No 3D acceleration")){
 #ifndef PLAT_UNIX		
 			MessageBox((HWND)os_get_window(), XSTR("Warning, Freespace 2 requires Glide or Direct3D hardware accleration. You will not be able to run Freespace 2 without it.", 1448), XSTR("Warning", 1449), MB_OK);
 #else

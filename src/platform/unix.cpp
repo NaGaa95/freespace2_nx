@@ -18,6 +18,8 @@
 
 #define MAX_LINE_WIDTH 128
 
+#ifndef SWITCH
+// On the Switch, newlib provides strlwr/strupr (char* returning) - see unix.h.
 void strlwr (char * str)
 {
 	while (*str) {*str = tolower (*str); str++; }
@@ -27,6 +29,7 @@ void strupr (char * str)
 {
 	while (*str) {*str = toupper (*str); str++; }
 }
+#endif
 
 int filelength (int fd)
 {

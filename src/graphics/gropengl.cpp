@@ -400,6 +400,76 @@
 
 static int Inited = 0;
 
+#ifdef USE_SDL2
+// On the Switch (and any SDL2 build) SDL owns the window + GL context; the
+// GLES render path (HAVE_GLES) draws into it and we present with
+// SDL_GL_SwapWindow().  eglport is not used in this configuration.
+static SDL_Window   *Nx_sdl_window = NULL;
+static SDL_GLContext Nx_sdl_glcontext = NULL;
+#endif
+
+#ifdef SWITCH
+// On-screen render rect (physical pixels). The game renders at its 4:3 internal
+// resolution into the off-screen FBO below, which is then scaled to fit the
+// panel; os_nx.cpp reads this rect to map touch input.
+int Nx_view_x = 0, Nx_view_y = 0, Nx_view_w = 0, Nx_view_h = 0;
+static int Nx_drawable_w = 0, Nx_drawable_h = 0;
+
+static GLuint Nx_fbo = 0, Nx_fbo_tex = 0, Nx_fbo_depth = 0;
+static int Nx_fbo_tw = 0, Nx_fbo_th = 0;
+int Nx_fbo_ok = 0;
+
+// FBO entry points come from libGLESv2 (linked with --allow-multiple-definition,
+// since its core GL symbols overlap libGLESv1_CM). The GLES1 headers omit them.
+#ifndef GL_FRAMEBUFFER
+#define GL_FRAMEBUFFER           0x8D40
+#define GL_RENDERBUFFER          0x8D41
+#define GL_COLOR_ATTACHMENT0     0x8CE0
+#define GL_DEPTH_ATTACHMENT      0x8D00
+#define GL_DEPTH_COMPONENT16     0x81A5
+#define GL_FRAMEBUFFER_COMPLETE  0x8CD5
+#endif
+extern "C" {
+void   glGenFramebuffers(GLsizei, GLuint *);
+void   glBindFramebuffer(GLenum, GLuint);
+void   glFramebufferTexture2D(GLenum, GLenum, GLenum, GLuint, GLint);
+void   glGenRenderbuffers(GLsizei, GLuint *);
+void   glBindRenderbuffer(GLenum, GLuint);
+void   glRenderbufferStorage(GLenum, GLenum, GLsizei, GLsizei);
+void   glFramebufferRenderbuffer(GLenum, GLenum, GLenum, GLuint);
+GLenum glCheckFramebufferStatus(GLenum);
+}
+
+static void nx_fbo_init();
+static void nx_fbo_bind();
+static void nx_fbo_present();
+
+// aspect-correct, centered (pillarboxed) on-screen rect
+static void nx_compute_view()
+{
+	int dw = 0, dh = 0;
+	SDL_GL_GetDrawableSize(Nx_sdl_window, &dw, &dh);
+	if (dw <= 0 || dh <= 0)
+		return;
+
+	Nx_drawable_w = dw;
+	Nx_drawable_h = dh;
+
+	float game_aspect = (float)gr_screen.max_w / (float)gr_screen.max_h;
+	int vw = dw;
+	int vh = (int)(vw / game_aspect + 0.5f);
+	if (vh > dh) {
+		vh = dh;
+		vw = (int)(vh * game_aspect + 0.5f);
+	}
+
+	Nx_view_x = (dw - vw) / 2;
+	Nx_view_y = (dh - vh) / 2;
+	Nx_view_w = vw;
+	Nx_view_h = vh;
+}
+#endif
+
 typedef enum gr_texture_source {
 	TEXTURE_SOURCE_NONE,
 	TEXTURE_SOURCE_DECAL,
@@ -530,16 +600,18 @@ void gr_opengl_activate(int active)
 {
 	if (active) {
 		GL_activate++;
-		
+#ifndef USE_SDL2
 		// don't grab key/mouse if cmdline says so or if we're fullscreen
 		if(!Cmdline_no_grab && !(SDL_GetVideoSurface()->flags & SDL_FULLSCREEN)) {
 			SDL_WM_GrabInput(SDL_GRAB_ON);
 		}
+#endif
 	} else {
 		GL_deactivate++;
-		
+#ifndef USE_SDL2
 		// let go of mouse/keyboard
 		SDL_WM_GrabInput(SDL_GRAB_OFF);
+#endif
 	}
 }
 
@@ -639,7 +711,13 @@ void gr_opengl_flip()
 	} while (error != GL_NO_ERROR);
 #endif
 	
-	#ifdef HAVE_GLES
+	#if defined(SWITCH)
+	nx_fbo_present();					// scale the off-screen buffer to the panel
+	SDL_GL_SwapWindow(Nx_sdl_window);
+	nx_fbo_bind();						// back to the off-screen buffer for next frame
+	#elif defined(USE_SDL2)
+	SDL_GL_SwapWindow(Nx_sdl_window);
+	#elif defined(HAVE_GLES)
 	EGL_SwapBuffers();
 	#else
 	SDL_GL_SwapBuffers ();
@@ -2951,6 +3029,106 @@ void gr_opengl_fade_out(int instantaneous)
 	// Empty - DDOI
 }
 
+#ifdef SWITCH
+static int nx_next_pow2(int v) { int p = 1; while (p < v) p *= 2; return p; }
+
+static void nx_fbo_init()
+{
+	Nx_fbo_ok = 0;
+
+	Nx_fbo_tw = nx_next_pow2(gr_screen.max_w);
+	Nx_fbo_th = nx_next_pow2(gr_screen.max_h);
+
+	glGenTextures(1, &Nx_fbo_tex);
+	glBindTexture(GL_TEXTURE_2D, Nx_fbo_tex);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, Nx_fbo_tw, Nx_fbo_th, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+	glGenRenderbuffers(1, &Nx_fbo_depth);
+	glBindRenderbuffer(GL_RENDERBUFFER, Nx_fbo_depth);
+	glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT16, Nx_fbo_tw, Nx_fbo_th);
+
+	glGenFramebuffers(1, &Nx_fbo);
+	glBindFramebuffer(GL_FRAMEBUFFER, Nx_fbo);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, Nx_fbo_tex, 0);
+	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, Nx_fbo_depth);
+
+	if (glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE) {
+		Nx_fbo_ok = 1;
+		glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+	} else {
+		glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	}
+
+	GL_last_bitmap_id = -1;
+	GL_bound_texture = NULL;
+}
+
+// bind the FBO and set the game viewport to the native (logical) resolution
+static void nx_fbo_bind()
+{
+	if (!Nx_fbo_ok)
+		return;
+	glBindFramebuffer(GL_FRAMEBUFFER, Nx_fbo);
+	glViewport(0, 0, gr_screen.max_w, gr_screen.max_h);
+}
+
+// Blit the FBO to the default framebuffer, scaled into the pillarbox rect.
+static void nx_fbo_present()
+{
+	if (!Nx_fbo_ok)
+		return;
+
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	nx_compute_view();
+
+	glDisable(GL_SCISSOR_TEST);
+	glViewport(0, 0, Nx_drawable_w, Nx_drawable_h);
+	glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+	glClear(GL_COLOR_BUFFER_BIT);
+
+	glViewport(Nx_view_x, Nx_view_y, Nx_view_w, Nx_view_h);
+
+	glDisable(GL_DEPTH_TEST);
+	glDisable(GL_BLEND);
+	glDisable(GL_ALPHA_TEST);
+	glDisable(GL_FOG);
+	glEnable(GL_TEXTURE_2D);
+	glBindTexture(GL_TEXTURE_2D, Nx_fbo_tex);
+	glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
+	glColor4ub(255, 255, 255, 255);
+
+	const float u = (float)gr_screen.max_w / (float)Nx_fbo_tw;
+	const float v = (float)gr_screen.max_h / (float)Nx_fbo_th;
+	GLfloat verts[] = { -1.0f,-1.0f,  1.0f,-1.0f,  1.0f,1.0f,  -1.0f,1.0f };
+	GLfloat texc[]  = {  0.0f, 0.0f,   u,   0.0f,   u,   v,     0.0f, v   };
+
+	glMatrixMode(GL_PROJECTION); glPushMatrix(); glLoadIdentity();
+	glMatrixMode(GL_MODELVIEW);  glPushMatrix(); glLoadIdentity();
+
+	glEnableClientState(GL_VERTEX_ARRAY);
+	glEnableClientState(GL_TEXTURE_COORD_ARRAY);
+	glVertexPointer(2, GL_FLOAT, 0, verts);
+	glTexCoordPointer(2, GL_FLOAT, 0, texc);
+	glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
+	glDisableClientState(GL_VERTEX_ARRAY);
+	glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+
+	glMatrixMode(GL_PROJECTION); glPopMatrix();
+	glMatrixMode(GL_MODELVIEW);  glPopMatrix();
+
+	// restore baseline state and invalidate the texture cache for the next frame
+	glEnable(GL_DEPTH_TEST);
+	glEnable(GL_BLEND);
+	GL_last_bitmap_id = -1;
+	GL_bound_texture = NULL;
+}
+#endif
+
 void gr_opengl_get_region(int front, int w, int h, ubyte *data)
 {
 	#ifndef HAVE_GLES
@@ -3212,7 +3390,53 @@ void gr_opengl_init()
 	mprintf(( "Initializing opengl graphics device...\n" ));
 	Inited = 1;
 
-#ifdef PLAT_UNIX	
+	int bpp = 15;	// reported depth; used unconditionally by switch(bpp) below
+
+#ifdef PLAT_UNIX
+#ifdef USE_SDL2
+	if (SDL_InitSubSystem(SDL_INIT_VIDEO) < 0) {
+		fprintf(stderr, "Couldn't init SDL video: %s\n", SDL_GetError());
+		exit(1);
+	}
+
+	// Request an OpenGL ES 1.1 context.  FreeSpace's GLES render path
+	// (HAVE_GLES) uses the fixed-function pipeline - matrix stack, vertex
+	// arrays, glColor/glFog/glTexEnv - which only exists in GLES 1.x, so we
+	// must NOT ask for ES 2.0 here.
+	SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
+	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 1);
+	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 1);
+	SDL_GL_SetAttribute(SDL_GL_RED_SIZE, 8);
+	SDL_GL_SetAttribute(SDL_GL_GREEN_SIZE, 8);
+	SDL_GL_SetAttribute(SDL_GL_BLUE_SIZE, 8);
+	SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
+	SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
+
+	Nx_sdl_window = SDL_CreateWindow(Osreg_title,
+		SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
+		gr_screen.max_w, gr_screen.max_h,
+		SDL_WINDOW_OPENGL | SDL_WINDOW_FULLSCREEN);
+
+	if (Nx_sdl_window == NULL) {
+		fprintf(stderr, "Couldn't create SDL window: %s\n", SDL_GetError());
+		exit(1);
+	}
+
+	Nx_sdl_glcontext = SDL_GL_CreateContext(Nx_sdl_window);
+	if (Nx_sdl_glcontext == NULL) {
+		fprintf(stderr, "Couldn't create GLES context: %s\n", SDL_GetError());
+		exit(1);
+	}
+
+	SDL_GL_MakeCurrent(Nx_sdl_window, Nx_sdl_glcontext);
+	SDL_GL_SetSwapInterval(1);	// vsync
+
+	mprintf(( "Vendor     : %s\n", glGetString(GL_VENDOR) ));
+	mprintf(( "Renderer   : %s\n", glGetString(GL_RENDERER) ));
+	mprintf(( "Version    : %s\n", glGetString(GL_VERSION) ));
+
+	SDL_ShowCursor(SDL_DISABLE);
+#else
 	if (SDL_InitSubSystem (SDL_INIT_VIDEO) < 0)
 	{
 		fprintf (stderr, "Couldn't init SDL: %s", SDL_GetError());
@@ -3306,8 +3530,6 @@ void gr_opengl_init()
 	mprintf(( "\n" ));
 #endif
 	
-	int bpp = 15;	
-	
 	#ifndef HAVE_GLES
 	int value;
 	int rgb_size[3];
@@ -3336,13 +3558,21 @@ void gr_opengl_init()
 
 	SDL_ShowCursor(0);
 	SDL_WM_SetCaption (Osreg_title, NULL);
-	
+
 	/* might as well put this here */
 	SDL_EnableKeyRepeat(SDL_DEFAULT_REPEAT_DELAY, SDL_DEFAULT_REPEAT_INTERVAL);
-#endif
+#endif // USE_SDL2
+#endif // PLAT_UNIX
 
 	GL_use_luminance_alpha = os_config_read_uint(NOX("OpenGL"), NOX("UseLuminanceAlpha"), 0);
-#ifdef PANDORA
+#if defined(SWITCH)
+	nx_compute_view();
+	nx_fbo_init();
+	if (Nx_fbo_ok)
+		nx_fbo_bind();
+	else
+		glViewport(Nx_view_x, Nx_view_y, Nx_view_w, Nx_view_h);
+#elif defined(PANDORA)
 	glViewport(80, 0, gr_screen.max_w, gr_screen.max_h);
 #else
 	glViewport(0, 0, gr_screen.max_w, gr_screen.max_h);

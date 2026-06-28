@@ -204,6 +204,10 @@
 #include "bmpman.h"
 #include "timer.h"
 #include "alphacolors.h"
+#ifdef SWITCH
+#include "key.h"
+#include "switch_input.h"
+#endif
 
 
 #define INPUTBOX_PASSWD_CHAR        '*'   // the password protected char
@@ -530,7 +534,33 @@ int UI_INPUTBOX::validate_input(int chr)
 
 void UI_INPUTBOX::process(int focus)
 {
-	int ascii, clear_lastkey, key, key_used, key_check;	
+	int ascii, clear_lastkey, key, key_used, key_check;
+
+#ifdef SWITCH
+	// Minus opens the system keyboard for the focused field, then injects the
+	// text + Enter so the owning screen commits it.
+	if (!disabled_flag && !hidden && (my_wnd->selected_gadget == this) && nx_keyboard_requested()) {
+		if (length > 0 && length < 500) {
+			char cur[512];
+			char nxbuf[512];
+			get_text(cur);
+
+			if (nx_get_text_input("Enter text", cur, nxbuf, sizeof(nxbuf))) {
+				char filtered[512];
+				int fi = 0;
+				for (int i = 0; nxbuf[i] && (fi < length); i++) {
+					if (validate_input((unsigned char) nxbuf[i]))
+						filtered[fi++] = nxbuf[i];
+				}
+				filtered[fi] = 0;
+				set_text(filtered);
+
+				key_mark(KEY_ENTER, 1, 0);
+				key_mark(KEY_ENTER, 0, 0);
+			}
+		}
+	}
+#endif
 
 	// check if mouse is pressed
 	if (B1_PRESSED && is_mouse_on()) {

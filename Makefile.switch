@@ -1,0 +1,150 @@
+# ----------------------------------------------------------------------------
+# Makefile.switch - Nintendo Switch (devkitA64 + libnx + SDL2) build for
+#                   FreeSpace / FreeSpace 2.
+#
+#   make -f Makefile.switch                # FreeSpace 2 (.nro)
+#   make -f Makefile.switch FS1=true       # FreeSpace 1
+#   make -f Makefile.switch DEMO=true      # demo data
+#   make -f Makefile.switch clean
+#
+# Requires devkitPro with these packages installed (dkp-pacman):
+#   switch-dev  switch-sdl2  switch-mesa  switch-glm  switch-libdrm_nouveau
+#   switch-openal-soft
+#
+# The resulting freespace2.nro goes in  sdmc:/switch/freespace2/  on the SD
+# card, together with the game data (the *.vp files and movies).
+# ----------------------------------------------------------------------------
+
+ifeq ($(strip $(DEVKITPRO)),)
+$(error "Please set DEVKITPRO in your environment, e.g. export DEVKITPRO=/opt/devkitpro")
+endif
+
+FS1   ?= false
+DEMO  ?= false
+DEBUG ?= false
+
+# ---- toolchain --------------------------------------------------------------
+PORTLIBS := $(DEVKITPRO)/portlibs/switch
+LIBNX    := $(DEVKITPRO)/libnx
+PREFIX   := $(DEVKITPRO)/devkitA64/bin/aarch64-none-elf-
+
+CXX := $(PREFIX)g++
+CC  := $(PREFIX)gcc
+LD  := $(PREFIX)g++
+
+# devkitPro tools (elf2nro, nacptool) live here
+TOOLS := $(DEVKITPRO)/tools/bin
+
+# pkg-config for SDL2 (and its dependency chain)
+PKGCONF := $(PORTLIBS)/bin/aarch64-none-elf-pkg-config
+
+# ---- target name ------------------------------------------------------------
+TARGET   := freespace2
+APP_TITLE  := FreeSpace 2
+APP_AUTHOR := ptitSeb, naga
+APP_VERSION := 1.0.0
+
+ifeq ($(strip $(FS1)),true)
+	TARGET    := freespace
+	APP_TITLE := FreeSpace
+endif
+
+# ---- flags ------------------------------------------------------------------
+ARCH := -march=armv8-a+crc+crypto -mtune=cortex-a57 -mtp=soft -fPIE
+
+DEFINES := -D__SWITCH__ -DSWITCH -DPLAT_UNIX -DHAVE_GLES -DUSE_SDL2
+
+ifeq ($(strip $(FS1)),true)
+	DEFINES += -DMAKE_FS1
+endif
+
+ifeq ($(strip $(DEMO)),true)
+	ifeq ($(strip $(FS1)),true)
+		DEFINES += -DFS1_DEMO -DDEMO
+	else
+		DEFINES += -DFS2_DEMO
+	endif
+else
+	DEFINES += -DRELEASE_REAL
+endif
+
+ifeq ($(strip $(DEBUG)),false)
+	DEFINES += -DNDEBUG
+	OPTFLAGS := -O2 -ffunction-sections -fdata-sections
+else
+	OPTFLAGS := -O0
+endif
+
+INCLUDE := -Iinclude \
+	-I$(PORTLIBS)/include \
+	-I$(PORTLIBS)/include/SDL2 \
+	-I$(LIBNX)/include
+
+SDL2_CFLAGS := $(shell $(PKGCONF) sdl2 --cflags 2>/dev/null)
+
+CFLAGS := -g $(OPTFLAGS) $(ARCH) -fsigned-char -fpermissive \
+	-Wno-format-y2k -Wno-write-strings \
+	$(DEFINES) $(INCLUDE) $(SDL2_CFLAGS)
+
+CXXFLAGS := $(CFLAGS)
+
+LIBDIRS  := -L$(PORTLIBS)/lib -L$(LIBNX)/lib
+LDFLAGS  := -specs=$(LIBNX)/switch.specs -g $(ARCH) $(LIBDIRS) \
+	-Wl,--gc-sections -Wl,--allow-multiple-definition
+
+# GLESv1_CM is the fixed-function render path; GLESv2 only supplies the
+# framebuffer-object functions. Both export the core GL symbols, so they're
+# linked with --allow-multiple-definition (LDFLAGS) and GLESv1_CM wins.
+SDL2_LIBS := $(shell $(PKGCONF) sdl2 --libs 2>/dev/null)
+LIBS := -lGLESv1_CM $(SDL2_LIBS) -lopenal -lEGL -lGLESv2 -lglapi -ldrm_nouveau -lnx -lm
+
+# Fallback if pkg-config is unavailable for some reason.
+ifeq ($(strip $(SDL2_LIBS)),)
+	LIBS := -lSDL2 -lGLESv1_CM -lEGL -lGLESv2 -lglapi -ldrm_nouveau -lopenal -lnx -lm
+endif
+
+# ----------------------------------------------------------------------------
+# Sources  (curated list - mirrors the Linux Makefile with the Switch platform
+# files swapped in for the unix ones, and the software rasteriser / DirectX /
+# Glide / FRED2 code left out)
+# ----------------------------------------------------------------------------
+include Makefile.switch.sources
+
+POSTFIX := switch
+OBJS := $(SOURCES:.cpp=.$(POSTFIX).o)
+
+# ---- rules ------------------------------------------------------------------
+.PHONY: all clean
+
+all: $(TARGET).nro
+
+%.$(POSTFIX).o: %.cpp
+	@echo "[CXX] $<"
+	@$(CXX) -c -o $@ $< $(CXXFLAGS)
+
+$(TARGET).elf: $(OBJS)
+	@echo "[LD]  $@"
+	@$(LD) -o $@ $(OBJS) $(LDFLAGS) $(LIBS)
+
+$(TARGET).nacp:
+	@echo "[NACP] $@"
+	@$(TOOLS)/nacptool --create "$(APP_TITLE)" "$(APP_AUTHOR)" "$(APP_VERSION)" $@
+
+# An icon is optional; if switch/icon.jpg exists it is embedded, otherwise the
+# default devkitPro icon is used.
+ICON := $(wildcard switch/icon.jpg)
+ifeq ($(strip $(ICON)),)
+	NROFLAGS := --nacp=$(TARGET).nacp
+else
+	NROFLAGS := --icon=$(ICON) --nacp=$(TARGET).nacp
+endif
+
+$(TARGET).nro: $(TARGET).elf $(TARGET).nacp
+	@echo "[NRO] $@"
+	@$(TOOLS)/elf2nro $(TARGET).elf $(TARGET).nro $(NROFLAGS)
+	@echo "Done -> $(TARGET).nro  (copy to sdmc:/switch/freespace2/ with the *.vp data)"
+
+clean:
+	@echo "Cleaning Switch build..."
+	@rm -f $(OBJS)
+	@rm -f $(TARGET).elf $(TARGET).nacp $(TARGET).nro

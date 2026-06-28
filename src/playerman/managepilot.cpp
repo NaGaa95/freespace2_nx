@@ -1291,7 +1291,11 @@ void init_new_pilot(player *p, int reset)
 		Game_skill_level = game_get_default_skill_level();
 
 		mprintf(( "Setting detail level to %d because of new pilot\n", cur_speed ));
+#ifdef SWITCH
+		Use_mouse_to_fly = 0;	// Switch flies with the left analog stick; default mouse-fly off
+#else
 		Use_mouse_to_fly = 1;/*SEB 0*/
+#endif
 		Mouse_sensitivity = 9; /*SEB 4*/
 		Joy_sensitivity = 9;
 		Dead_zone_size = 10;

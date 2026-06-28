@@ -14,6 +14,9 @@
 #include "osregistry.h"
 #include "joy_ff.h"
 #include "osapi.h"
+#ifdef SWITCH
+#include "switch_input.h"
+#endif
 
 static int Joy_inited = 0;
 int joy_num_sticks = 0;
@@ -70,7 +73,11 @@ void joy_get_caps (int max)
 		joy = SDL_JoystickOpen (j);
 		if (joy)
 		{
+#ifdef USE_SDL2
+			nprintf (("JOYSTICK", "Joystick #%d: %s\n", j - JOYSTICKID1 + 1, SDL_JoystickNameForIndex(j)));
+#else
 			nprintf (("JOYSTICK", "Joystick #%d: %s\n", j - JOYSTICKID1 + 1, SDL_JoystickName(j)));
+#endif
 			if (j == Cur_joystick) {
 				for (int i = 0; i < SDL_JoystickNumAxes(joy); i++)
 				{
@@ -456,73 +463,104 @@ int joystick_read_raw_axis(int num_axes, int *axis)
 		}
 		#endif
 	}
-	
+
+	// (Gyro aiming is injected after the deadzone in control_get_axes_readings.)
+
 	return 1;
 }
 
+// On the Switch these force-feedback hooks (already called by the engine at the
+// right gameplay moments) drive HD rumble. On other platforms they stay stubs.
+
 void joy_ff_adjust_handling(int speed)
 {
-//	STUB_FUNCTION;
 }
 
 void joy_ff_afterburn_off()
 {
-//	STUB_FUNCTION;
+#ifdef SWITCH
+	nx_rumble_set_continuous(0.0f);
+#endif
 }
 
 void joy_ff_afterburn_on()
 {
-//	STUB_FUNCTION;
+#ifdef SWITCH
+	nx_rumble_set_continuous(0.15f);
+#endif
 }
 
 void joy_ff_deathroll()
 {
-//	STUB_FUNCTION;
+#ifdef SWITCH
+	nx_rumble_pulse(0.85f, 600);
+#endif
 }
 
 void joy_ff_docked()
 {
-//	STUB_FUNCTION;
+#ifdef SWITCH
+	nx_rumble_pulse(0.40f, 200);
+#endif
 }
 
 void joy_ff_explode()
 {
-//	STUB_FUNCTION;
+#ifdef SWITCH
+	nx_rumble_pulse(1.0f, 300);
+#endif
 }
 
 void joy_ff_fly_by(int mag)
 {
-//	STUB_FUNCTION;
+#ifdef SWITCH
+	nx_rumble_pulse(0.20f, 60);
+#endif
 }
 
 void joy_ff_mission_init(vector v)
 {
-//	STUB_FUNCTION;
+#ifdef SWITCH
+	nx_rumble_set_continuous(0.0f);
+#endif
 }
 
 void joy_ff_play_dir_effect(float x, float y)
 {
-//	STUB_FUNCTION;
+#ifdef SWITCH
+	nx_rumble_pulse(0.50f, 120);
+#endif
 }
 
 void joy_ff_play_primary_shoot(int gain)
 {
-//	STUB_FUNCTION;
+#ifdef SWITCH
+	(void) gain;
+	nx_rumble_pulse(0.30f, 70);
+#endif
 }
 
 void joy_ff_play_reload_effect()
 {
-//	STUB_FUNCTION;
+#ifdef SWITCH
+	nx_rumble_pulse(0.25f, 60);
+#endif
 }
 
 void joy_ff_play_secondary_shoot(int gain)
 {
-//	STUB_FUNCTION;
+#ifdef SWITCH
+	(void) gain;
+	nx_rumble_pulse(0.60f, 140);
+#endif
 }
 
 void joy_ff_play_vector_effect(vector *v, float scaler)
 {
-//	STUB_FUNCTION;
+#ifdef SWITCH
+	(void) v; (void) scaler;
+	nx_rumble_pulse(0.55f, 160);
+#endif
 }
 
 void joy_ff_stop_effects()

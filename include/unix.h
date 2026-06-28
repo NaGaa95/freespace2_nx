@@ -38,15 +38,19 @@
 #define PASCAL
 #define CALLBACK
 
-#if ( defined(__x86_64__) || defined(_WIN64) )
+#if ( defined(__x86_64__) || defined(_WIN64) || defined(__aarch64__) || defined(__LP64__) )
 typedef unsigned int DWORD;
 #else
 typedef unsigned long DWORD;
 #endif
 typedef unsigned short WORD;
 
+#ifndef SWITCH
+// devkitPro's newlib already provides strlwr/strupr (as char* returning); on
+// the Switch we use those instead of our own to avoid a conflicting declaration.
 extern void strlwr (char *str);
 extern void strupr (char *str);
+#endif
 extern int filelength (int fd);
 extern int MulDiv (int, int, int);
 
@@ -108,6 +112,12 @@ typedef struct {
 #define TIMEVAL struct timeval
 #define SERVENT struct servent
 #define BOOL int
+
+// devkitPro's newlib does not define ESHUTDOWN; provide a fallback so the
+// WSAESHUTDOWN mapping below compiles (value matches Linux).
+#if defined(SWITCH) && !defined(ESHUTDOWN)
+#define ESHUTDOWN 108
+#endif
 
 #define WSAEALREADY EALREADY
 #define WSAEINVAL EINVAL

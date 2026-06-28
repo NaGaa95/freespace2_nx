@@ -3607,7 +3607,7 @@ void wl_saturate_bank(int ship_slot, int bank)
 
 	slot = &Wss_slots[ship_slot];
 
-	if ( (slot->wep[bank] < 0) || (slot->wep_count <= 0) ) {
+	if ( (slot->wep[bank] < 0) || (slot->wep_count[bank] <= 0) ) {
 		return;
 	}
 

@@ -148,6 +148,9 @@
 #include "mouse.h"
 #include "2d.h"
 #include "osapi.h"
+#ifdef SWITCH
+#include "switch_input.h"
+#endif
 
 #define MOUSE_MODE_DI	0
 #define MOUSE_MODE_WIN	1
@@ -469,7 +472,9 @@ void mouse_get_delta(int *dx, int *dy, int *dz)
 void mouse_force_pos(int x, int y)
 {
 	if (os_foreground()) {  // only mess with windows's mouse if we are in control of it
-#ifdef PLAT_UNIX
+#ifdef SWITCH
+		nx_warp_mouse(x, y);
+#elif defined(PLAT_UNIX)
 		SDL_WarpMouse(x, y);
 #else
 		POINT pnt;
@@ -505,7 +510,9 @@ void mouse_eval_deltas()
 
 	ENTER_CRITICAL_SECTION(&mouse_lock);
 
-#ifdef PLAT_UNIX
+#ifdef SWITCH
+	nx_get_mouse (&tmp_x, &tmp_y);
+#elif defined(PLAT_UNIX)
 	SDL_GetMouseState (&tmp_x, &tmp_y);
 #else
 	POINT pnt;
@@ -622,7 +629,10 @@ int mouse_get_pos(int *xpos, int *ypos)
 		return 0;
 	}
 
-#ifdef PLAT_UNIX
+#ifdef SWITCH
+	nx_get_mouse (&Mouse_x, &Mouse_y);
+	flags = nx_get_mouse_buttons();
+#elif defined(PLAT_UNIX)
 	flags = SDL_GetMouseState (&Mouse_x, &Mouse_y);
 	// DDOI - FIXME?
 #else
@@ -674,13 +684,15 @@ void mouse_get_real_pos(int *mx, int *my)
 		return;
 	}
 
-#ifdef PLAT_UNIX
+#ifdef SWITCH
+	nx_get_mouse (mx, my);
+#elif defined(PLAT_UNIX)
 	SDL_GetMouseState (mx, my);
 #else
 	POINT pnt;
 	GetCursorPos(&pnt);
 	ScreenToClient((HWND)os_get_window(), &pnt);
-	
+
 	*mx = pnt.x;
 	*my = pnt.y;
 #endif

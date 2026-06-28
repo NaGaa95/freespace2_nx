@@ -292,7 +292,7 @@ typedef unsigned long ulong;
 typedef int fs_time_t;	// forced 32-bit version of time_t - **don't use this unless required**
 
 // ptr_? is a value matching the size of a pointer on this specific platform
-#if ( defined(__x86_64__) || defined(_WIN64) )
+#if ( defined(__x86_64__) || defined(_WIN64) || defined(__aarch64__) || defined(__LP64__) )
 typedef __int64 ptr_s;
 typedef unsigned __int64 ptr_u;
 #else

@@ -1,9 +1,19 @@
 *.o
 *.a
-freespace
-freespace2
+# anchored to repo root so they match the built binaries, NOT the src/freespace2/ dir
+/freespace
+/freespace2
+/freespace_demo
+/freespace2_demo
 *.MVE
 *.vp
 *.mve
 Data
 Cache
+
+# Nintendo Switch build artifacts
+*.nro
+*.nso
+*.elf
+*.nacp
+switch/icon.jpg

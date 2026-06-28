@@ -340,6 +340,9 @@
 #include "uidefs.h"
 #include "multiutil.h"
 #include "alphacolors.h"
+#ifdef SWITCH
+#include "switch_input.h"
+#endif
 
 #define NUM_SYSTEM_KEYS			14
 #define NUM_BUTTONS				19
@@ -2583,6 +2586,20 @@ void control_get_axes_readings(int *h, int *p, int *b, int *ta, int *tr)
 		*ta = F1_0 - *ta;
 	if (Invert_axis[4])
 		*tr = -(*tr);
+
+#ifdef SWITCH
+	// gyro aim: add controller tilt to heading/pitch (after the deadzone)
+	{
+		float gyaw = 0.0f, gpitch = 0.0f;
+		nx_get_gyro_aim(&gyaw, &gpitch);
+		*h += (int) gyaw;
+		*p += (int) gpitch;
+		if (*h >  F1_0) *h =  F1_0;
+		if (*h < -F1_0) *h = -F1_0;
+		if (*p >  F1_0) *p =  F1_0;
+		if (*p < -F1_0) *p = -F1_0;
+	}
+#endif
 
 	return;
 }

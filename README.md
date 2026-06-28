@@ -13,6 +13,19 @@ Copyright (C) Volition, Inc. 1999.  All rights reserved.
 All source code herein is the property of Volition, Inc. You may not sell or otherwise commercially exploit the source or things you created based on the source.
 ----------------------------------------------
 
+# Nintendo Switch
+
+There is a native Nintendo Switch (libnx) homebrew port. It builds a `.nro`
+with devkitPro + `switch-sdl2` and reuses the OpenGL ES 1.1 render path.
+
+```bash
+make -f Makefile.switch            # FreeSpace 2
+make -f Makefile.switch FS1=true   # FreeSpace 1
+```
+
+See [SWITCH_PORT.md](SWITCH_PORT.md) for full build instructions, the install
+layout, and the Joy-Con / touch-screen control mapping.
+
 # How to Compile
 
 
