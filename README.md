@@ -23,9 +23,6 @@ make -f Makefile.switch            # FreeSpace 2
 make -f Makefile.switch FS1=true   # FreeSpace 1
 ```
 
-See [SWITCH_PORT.md](SWITCH_PORT.md) for full build instructions, the install
-layout, and the Joy-Con / touch-screen control mapping.
-
 # How to Compile
 
 
