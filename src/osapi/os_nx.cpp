@@ -204,9 +204,6 @@ static float	Nx_gyro_pitch = 0.0f;
 
 #define NX_GYRO_SCALE	(65536.0f * 8.0f)
 
-// on-screen render rect (physical pixels), set by gropengl.cpp; used to map touch
-extern int Nx_view_x, Nx_view_y, Nx_view_w, Nx_view_h;
-
 #define NX_STICK_CURSOR_SPEED	14.0f
 #define NX_STICK_DEADZONE		3500
 
@@ -334,8 +331,13 @@ void nx_input_poll(void)
 			nx_apply_button(key, 0);
 	}
 
-	// Minus opens the on-screen keyboard for the focused text field
-	Nx_kbd_request = (kDown & HidNpadButton_Minus) ? 1 : 0;
+	// Minus opens the on-screen keyboard for the focused text field. LATCH the
+	// request rather than pulsing it: os_poll() runs more than once per frame (the
+	// main loop AND UI_WINDOW::process), so a per-poll pulse is cleared by the second
+	// poll - Minus is then held, not newly pressed - before the input box reads it.
+	// nx_keyboard_requested() consumes the latch.
+	if (kDown & HidNpadButton_Minus)
+		Nx_kbd_request = 1;
 
 	// right stick -> menu cursor (in a mission it is read as throttle/rudder)
 	if (!in_mission) {
@@ -361,11 +363,21 @@ void nx_input_poll(void)
 		Nx_gyro_pitch = 0.0f;
 	}
 
-	// touch screen -> absolute cursor + left button, mapped through the view rect
+	// touch screen -> absolute cursor + left button.
+	// The Switch touch panel always reports in a fixed 1280x720 space, independent of
+	// the GL drawable/output resolution. Map through a pillarbox computed in that same
+	// panel space (NOT the drawable-space view rect used for rendering), or the scale
+	// is wrong (e.g. the right edge lands near the middle).
 	HidTouchScreenState touch = {0};
-	if (hidGetTouchScreenStates(&touch, 1) && touch.count > 0 && Nx_view_w > 0 && Nx_view_h > 0) {
-		Nx_mouse_x = (int)((s64)((int)touch.touches[0].x - Nx_view_x) * gr_screen.max_w / Nx_view_w);
-		Nx_mouse_y = (int)((s64)((int)touch.touches[0].y - Nx_view_y) * gr_screen.max_h / Nx_view_h);
+	if (hidGetTouchScreenStates(&touch, 1) && touch.count > 0 && gr_screen.max_h > 0) {
+		const int panel_w = 1280, panel_h = 720;
+		float aspect = (float)gr_screen.max_w / (float)gr_screen.max_h;
+		int vw = panel_w, vh = (int)(panel_w / aspect + 0.5f);
+		if (vh > panel_h) { vh = panel_h; vw = (int)(panel_h * aspect + 0.5f); }
+		int vx = (panel_w - vw) / 2, vy = (panel_h - vh) / 2;
+
+		Nx_mouse_x = (int)((s64)((int)touch.touches[0].x - vx) * gr_screen.max_w / vw);
+		Nx_mouse_y = (int)((s64)((int)touch.touches[0].y - vy) * gr_screen.max_h / vh);
 
 		if (!(Nx_mouse_buttons & MOUSE_LEFT_BUTTON))
 			nx_set_mouse_button(MOUSE_LEFT_BUTTON, 1);
@@ -439,7 +451,9 @@ int nx_get_text_input(const char *guide_text, const char *initial_text, char *ou
 
 int nx_keyboard_requested(void)
 {
-	return Nx_kbd_request;
+	int r = Nx_kbd_request;
+	Nx_kbd_request = 0;		// consume: the request is handled exactly once
+	return r;
 }
 
 // CPU boost for faster level loading (hooked around the loading screen only).

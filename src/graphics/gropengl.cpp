@@ -2828,8 +2828,15 @@ static int gr_opengl_tcache_set(int bitmap_id, int bitmap_type, float *u_scale, 
 
 			// now lets do something for each texture
 
-			for(idx=0; idx<bmp->sections.num_x; idx++){
-				for(s_idx=0; s_idx<bmp->sections.num_y; s_idx++){
+			// A power-of-two padded capture (GLES pads e.g. 1024x768 -> 1024x1024)
+			// can report more sections than the data_sections[MAX_BMAP_SECTIONS_X]
+			// [MAX_BMAP_SECTIONS_Y] array holds; indexing past it hands a NULL slot to
+			// opengl_create_texture_sectioned -> NULL deref crash. Clamp to the array
+			// bounds - the extra rows/cols fall outside the visible screen anyway.
+			int snum_x = (bmp->sections.num_x > MAX_BMAP_SECTIONS_X) ? MAX_BMAP_SECTIONS_X : bmp->sections.num_x;
+			int snum_y = (bmp->sections.num_y > MAX_BMAP_SECTIONS_Y) ? MAX_BMAP_SECTIONS_Y : bmp->sections.num_y;
+			for(idx=0; idx<snum_x; idx++){
+				for(s_idx=0; s_idx<snum_y; s_idx++){
 					// hmm. i'd rather we didn't have to do it this way...
 					if(!opengl_create_texture_sectioned(bitmap_id, bitmap_type, t->data_sections[idx][s_idx], idx, s_idx, fail_on_full)){
 						ret_val = 0;

@@ -371,7 +371,15 @@ typedef struct vertex {
 // max res == 1024x768. max texture size == 256
 #define MAX_BMAP_SECTIONS_X				4
 #define MAX_BMAP_SECTIONS_Y				3
+#ifdef SWITCH
+// GLES pads the saved screen to power-of-two (1024x768 capture -> 1024x1024). At a
+// 256 section size that tiles to 4x4 and overruns MAX_BMAP_SECTIONS_Y (3) -> a NULL
+// section slot -> crash on every screen-saving popup. 512 tiles to 2x2, safely
+// inside the 4x3 array, with each section still <= the 1024 GLES texture limit.
+#define MAX_BMAP_SECTION_SIZE				512
+#else
 #define MAX_BMAP_SECTION_SIZE				256
+#endif
 typedef struct bitmap_section_info {
 	ushort sx[MAX_BMAP_SECTIONS_X];		// x offset of each section
 	ushort sy[MAX_BMAP_SECTIONS_Y];		// y offset of each section

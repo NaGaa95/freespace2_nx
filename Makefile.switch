@@ -42,7 +42,7 @@ PKGCONF := $(PORTLIBS)/bin/aarch64-none-elf-pkg-config
 TARGET   := freespace2
 APP_TITLE  := FreeSpace 2
 APP_AUTHOR := ptitSeb, naga
-APP_VERSION := 1.0.0
+APP_VERSION := 1.0.1
 
 ifeq ($(strip $(FS1)),true)
 	TARGET    := freespace
@@ -112,6 +112,7 @@ include Makefile.switch.sources
 
 POSTFIX := switch
 OBJS := $(SOURCES:.cpp=.$(POSTFIX).o)
+DEPS := $(OBJS:.o=.d)
 
 # ---- rules ------------------------------------------------------------------
 .PHONY: all clean
@@ -120,7 +121,11 @@ all: $(TARGET).nro
 
 %.$(POSTFIX).o: %.cpp
 	@echo "[CXX] $<"
-	@$(CXX) -c -o $@ $< $(CXXFLAGS)
+	@$(CXX) -c -o $@ $< $(CXXFLAGS) -MMD -MP -MF $(@:.o=.d)
+
+# header-dependency tracking: a .d file per object lists the headers it includes,
+# so editing a header (e.g. pstypes.h) triggers a rebuild without a manual clean.
+-include $(DEPS)
 
 $(TARGET).elf: $(OBJS)
 	@echo "[LD]  $@"
@@ -146,5 +151,5 @@ $(TARGET).nro: $(TARGET).elf $(TARGET).nacp
 
 clean:
 	@echo "Cleaning Switch build..."
-	@rm -f $(OBJS)
+	@rm -f $(OBJS) $(DEPS)
 	@rm -f $(TARGET).elf $(TARGET).nacp $(TARGET).nro
